@@ -149,6 +149,7 @@ function publish(promise) {
 
 function publishFulfillment(promise) {
 	promise._state = FULFILLED;
+	promise._owner = null;
 	publish(promise);
 }
 
@@ -162,6 +163,22 @@ function publishRejection(promise) {
 
 function notifyRejectionHandled(promise) {
 	process.emit('rejectionHandled', promise);
+}
+
+function publishRejectionHandled(promise) {
+	promise._handled = true;
+	if (promise._state === REJECTED && isNode) {
+		asyncCall(notifyRejectionHandled, promise);
+	}
+
+	if (promise._owner) {
+		var owner = promise._owner;
+		promise._owner = null;
+
+		if (!owner._handled) {
+			publishRejectionHandled(owner);
+		}
+	}
 }
 
 /**
@@ -188,6 +205,7 @@ Promise.prototype = {
 	_then: null,
 	_data: undefined,
 	_handled: false,
+	_owner: null,
 
 	then: function (onFulfillment, onRejection) {
 		var subscriber = {
@@ -198,10 +216,11 @@ Promise.prototype = {
 		};
 
 		if (onRejection && !this._handled) {
-			this._handled = true;
-			if (this._state === REJECTED && isNode) {
-				asyncCall(notifyRejectionHandled, this);
-			}
+			publishRejectionHandled(this);
+		}
+
+		if (isNode && !(this._handled || this._state === FULFILLED)) {
+			subscriber.then._owner = this;
 		}
 
 		if (this._state === FULFILLED || this._state === REJECTED) {
